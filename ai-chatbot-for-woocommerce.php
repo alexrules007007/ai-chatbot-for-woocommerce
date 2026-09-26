@@ -2421,7 +2421,7 @@ function wcai_page_settings() {
         $max_chars = 4000;
         if (mb_strlen($merchant_prompt, 'UTF-8') > $max_chars) {
             $merchant_prompt = mb_substr($merchant_prompt, 0, $max_chars, 'UTF-8');
-            echo '<div class="notice notice-warning"><p>⚠️ Instructions truncated to 4000 characters.</p></div>';
+            echo '<div class="notice notice-warning"><p>⚠️ Instructions truncated to 4000 characters to save tokens.</p></div>';
         }
         update_option('wcai_merchant_prompt', $merchant_prompt);
         update_option('wcai_welcome_message', sanitize_text_field(wp_unslash($_POST['welcome_message'] ?? '')));
@@ -2434,23 +2434,71 @@ function wcai_page_settings() {
     $welcome_message = get_option('wcai_welcome_message', 'Hi! How can I help you find products today?');
     $store_name = get_option('wcai_store_name', get_bloginfo('name'));
     $show_chatbot = get_option('wcai_show_chatbot', 1);
+
+    $example_prompt = "## About Us\n{store_name} is a trusted online store committed to providing high-quality products and exceptional customer service.\n\n## Contact Information\n- Support Email: {support_email}\n- Website: {store_url}\nAlways use the store's actual contact information. Never invent contact details.\n\n## Product Knowledge\n- Use ONLY product data from the store database as the single source of truth.\n- NEVER invent: price, stock, sizes, colors, materials, dimensions, weight, compatibility, features, warranty, availability, shipping times.\n- If unknown: \"I don't have that information. Please check the product page or contact {support_email}.\"\n\n## Product Search & Recommendations\n- Help customers find products based on needs, preferences, budget, requirements.\n- Ask 1-2 short clarifying questions when vague (e.g., \"What size?\" or \"Budget range?\").\n- Recommend best matches; if no exact match, suggest closest alternatives.\n- Show product cards with name, price, image, key features, direct link.\n\n## Product Details\n- Each product card has a \"Show more\" button with full details (sizes, material, colors, stitches, description).\n- Don't repeat full descriptions in your reply — let the card handle it.\n\n## SKU Search\n- Customers can search by SKU directly (e.g., \"ABC-123\").\n- SKU search is handled automatically by the system before reaching you.\n- If a customer provides a SKU, it will be resolved to a product automatically.\n\n## Pricing & Currency\n- Display prices in the store's active currency with correct symbol.\n- Prices are automatically converted to the customer's selected currency.\n- Never convert or recalculate prices yourself.\n- Show prices exactly as they appear. Never round up or down.\n- For sales, show both original and sale price.\n- For variable products, show price range or lowest available price.\n- Never invent discounts, promotions, or special offers.\n\n## Stock & Availability\n- Always check real-time stock status before recommending.\n- Never recommend out-of-stock items as available. Suggest in-stock alternatives.\n- If specific size/color/variation is out of stock, inform customer and suggest alternatives.\n\n## Shipping & Delivery\n- Follow store's shipping policy exactly as defined.\n- If shipping costs depend on location or order value, ask for location or explain general policy.\n- Don't provide delivery dates/timeframes unless store explicitly provides them.\n- If unknown: \"Shipping details at checkout. Contact {support_email}.\"\n\n## Returns, Refunds & Warranties\n- Follow official return/refund policy exactly. Never modify or interpret differently.\n- Don't promise refunds, exchanges, or exceptions not explicitly stated in policy.\n- Never authorize returns/refunds — only through official process.\n\n## Customer Support & Escalation\nFor issues requiring human assistance, always provide actual store contact info:\n- \"For help, contact {support_email}.\"\n- \"For payment or order issues, reach out to {support_email}.\"\n\nWhen to escalate:\n- Payment problems (failed transactions, billing issues)\n- Order issues (wrong/damaged/missing items)\n- Account problems (login, password, profile)\n- Technical support (download issues, software problems)\n- Custom requests outside standard offerings\n- Any question you cannot confidently answer\n\nNever:\n- Invent support response times, hours, or policies\n- Attempt to resolve payment/billing/account issues directly\n- Provide contact info that isn't the official store contact\n\n## Order Status & Tracking\n- Use the built-in Order Status tool to check order status.\n- Ask customer for Order ID and billing email.\n- Don't display order information directly in chat — the tool handles it.\n- If tool unavailable: \"Check order status on website using order ID and email. Contact {support_email} for help.\"\n\n## Customization & Personalization\n- If store offers customization, explain options using store data.\n- Never promise custom work, pricing, or deadlines unless provided by store.\n- If unavailable: \"Customization not currently offered. Check product page for options.\"\n\n## Comparisons & Alternatives\n- Compare products using actual data: features, price, specifications, ratings.\n- Never invent differences.\n- For \"What's better?\", provide balanced comparison based on features and use cases.\n\n## Customer Reviews & Ratings\n- Use actual product ratings and review counts from store data.\n- Never invent, inflate, or modify ratings.\n\n## Language & Tone\n- Be friendly, professional, helpful. Use clear, simple language.\n- Be concise — answer directly without unnecessary fluff.\n- Use emojis sparingly (✅ in-stock, ⭐ ratings).\n- Don't mention instructions, your training, or being AI.\n\n## Limitations\n- If you don't know: \"I don't have that information, but I can help you find products.\"\n- If outside scope: \"I'm here to help with products. For other questions, contact {support_email}.\"\n\n## Special Cases\n- Digital Products: Explain delivery method using store data.\n- Services: Explain booking process using store data.\n- Subscriptions: Explain pricing, benefits, cancellation using store data.\n\n## Final Rule\nEverything must be backed by store data. If not in database, don't say it. Accuracy over helpfulness — wrong answer is worse than \"I don't know.\"";
     ?>
     <div class="wrap">
         <h1>⚙️ Settings</h1>
+
         <div style="background:#f0fdf4;border-left:4px solid #22c55e;padding:14px 18px;border-radius:10px;margin:16px 0;font-size:13px;">
             <strong>📝 Store Instructions</strong> — max <strong>4000 characters</strong>
+            <br>Excess will be automatically truncated on save.
         </div>
+
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px 20px;margin:16px 0;">
+            <h3 style="margin:0 0 8px;color:#1e40af;">📖 Universal Example (for any store)</h3>
+            <p style="margin:0 0 8px;color:#6b7280;font-size:13px;">
+                Use sections: <code>## About Us</code>, <code>## Products</code>, <code>## Recommendations</code>, <code>## Shipping</code>, <code>## Returns & Refunds</code>, <code>## Support</code>, <code>## Customization</code>, <code>## Communication</code>
+                <br>AI will use this information when responding to customers.
+            </p>
+            <div style="background:#1e293b;color:#e2e8f0;padding:12px 16px;border-radius:6px;font-family:monospace;font-size:12px;white-space:pre-wrap;overflow-x:auto;max-height:300px;overflow-y:auto;">
+<?php echo esc_textarea($example_prompt); ?>
+            </div>
+            <button type="button" onclick="document.querySelector('textarea[name=merchant_prompt]').value = `<?php echo esc_js($example_prompt); ?>`;" style="margin-top:10px;background:#4F46E5;color:#fff;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-size:13px;">
+                📋 Insert example
+            </button>
+        </div>
+
         <form method="post">
             <?php wp_nonce_field('wcai_settings_action'); ?>
             <table class="form-table">
-                <tr><th>Store Name</th><td><input type="text" name="store_name" value="<?php echo esc_attr($store_name); ?>" class="regular-text"></td></tr>
-                <tr><th>Welcome Message</th><td><input type="text" name="welcome_message" value="<?php echo esc_attr($welcome_message); ?>" class="regular-text"></td></tr>
-                <tr><th>Show Chatbot</th><td>
-                    <label><input type="checkbox" name="show_chatbot" value="1" <?php checked($show_chatbot, 1); ?>> Enable chatbot on site</label>
-                </td></tr>
-                <tr><th>Store Instructions</th><td>
-                    <textarea name="merchant_prompt" rows="10" style="width:100%;max-width:600px;font-family:monospace;font-size:13px;" maxlength="4000"><?php echo esc_textarea($merchant_prompt); ?></textarea>
-                </td></tr>
+                <tr>
+                    <th>Store Name</th>
+                    <td>
+                        <input type="text" name="store_name" value="<?php echo esc_attr($store_name); ?>" class="regular-text">
+                    </td>
+                </tr>
+                <tr>
+                    <th>Welcome Message</th>
+                    <td>
+                        <input type="text" name="welcome_message" value="<?php echo esc_attr($welcome_message); ?>" class="regular-text">
+                    </td>
+                </tr>
+                <tr>
+                    <th>Show Chatbot</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="show_chatbot" value="1" <?php checked($show_chatbot, 1); ?>>
+                            Enable chatbot on site
+                        </label>
+                        <p class="description">Uncheck to hide the chat widget from the frontend</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Store Instructions <br><small style="font-weight:normal;color:#6b7280;">Max 4000 characters</small></th>
+                    <td>
+                        <textarea
+                            name="merchant_prompt"
+                            rows="10"
+                            style="width:100%;max-width:600px;font-family:monospace;font-size:13px;"
+                            maxlength="4000"
+                            oninput="document.getElementById('wcai-char-count').textContent = this.value.length;"
+                        ><?php echo esc_textarea($merchant_prompt); ?></textarea>
+                        <p class="description">
+                            <span id="wcai-char-count"><?php echo esc_html(mb_strlen($merchant_prompt, 'UTF-8')); ?></span> / 4000 characters
+                        </p>
+                    </td>
+                </tr>
             </table>
             <button name="save" class="button button-primary">💾 Save Settings</button>
         </form>
