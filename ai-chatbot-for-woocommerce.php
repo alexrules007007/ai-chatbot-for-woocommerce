@@ -659,7 +659,10 @@ add_action('save_post_product', function ($product_id, $post) {
     if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
     if (wp_is_post_revision($product_id)) return;
     if ($post->post_status !== 'publish') return;
-    if (get_option('wcai_index_status') === 'done') wcai_index_product($product_id);
+    if (did_action('woocommerce_update_product')) return;
+    if (get_option('wcai_index_status') === 'done') {
+        wcai_index_product($product_id);
+    }
 }, 10, 2);
 
 add_action('woocommerce_delete_product', function ($product_id) {
