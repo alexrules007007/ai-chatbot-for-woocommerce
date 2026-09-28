@@ -1008,6 +1008,14 @@ function wcai_format_products($results, $override_currency = null) {
 
         $available_sizes = [];
         $sizes_data = $p->available_sizes ?? null;
+		$formats = [];
+$formats_data = $p->formats ?? null;
+if ($formats_data) {
+    try {
+        $formats_arr = json_decode($formats_data, true);
+        if (is_array($formats_arr)) $formats = $formats_arr;
+    } catch (Exception $e) { $formats = []; }
+}
         if ($sizes_data) {
             try {
                 $sizes = json_decode($sizes_data, true);
@@ -1056,6 +1064,7 @@ function wcai_format_products($results, $override_currency = null) {
             'description'       => $description,
             'available_sizes'   => $available_sizes,
             'material'          => $p->material ?? '',
+			'formats'           => $formats,
             'colors'            => (int)($p->colors ?? 0),
             'stitches'          => (int)($p->stitches ?? 0),
             'difficulty'        => $p->difficulty ?? '',
