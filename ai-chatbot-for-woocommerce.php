@@ -652,17 +652,26 @@ function wcai_start_background_index() {
 }
 
 add_action('woocommerce_update_product', function ($product_id) {
-    if (get_option('wcai_index_status') === 'done') wcai_index_product($product_id);
+    if (get_option('wcai_index_status') !== 'done') return;
+    
+    static $indexed = [];
+    if (isset($indexed[$product_id])) return;
+    $indexed[$product_id] = true;
+    
+    wcai_index_product($product_id);
 }, 10, 1);
 
 add_action('save_post_product', function ($product_id, $post) {
     if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
     if (wp_is_post_revision($product_id)) return;
     if ($post->post_status !== 'publish') return;
-    if (did_action('woocommerce_update_product')) return;
-    if (get_option('wcai_index_status') === 'done') {
-        wcai_index_product($product_id);
-    }
+    if (get_option('wcai_index_status') !== 'done') return;
+    
+    static $indexed = [];
+    if (isset($indexed[$product_id])) return;
+    $indexed[$product_id] = true;
+    
+    wcai_index_product($product_id);
 }, 10, 2);
 
 add_action('woocommerce_delete_product', function ($product_id) {
@@ -672,7 +681,14 @@ add_action('woocommerce_delete_product', function ($product_id) {
 });
 
 add_action('woocommerce_product_set_stock', function ($product) {
-    if (get_option('wcai_index_status') === 'done') wcai_index_product($product->get_id());
+    if (get_option('wcai_index_status') !== 'done') return;
+    
+    $product_id = $product->get_id();
+    static $indexed = [];
+    if (isset($indexed[$product_id])) return;
+    $indexed[$product_id] = true;
+    
+    wcai_index_product($product_id);
 });
 
 function wcai_detect_attribute_schema() {
