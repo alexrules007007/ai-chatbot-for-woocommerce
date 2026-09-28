@@ -635,7 +635,7 @@ if (!function_exists('wcai_cron_index_batch_handler')) {
         update_option('wcai_index_offset', $offset);
 
         if ($offset < $total) {
-            as_schedule_single_action(time() + 1, 'wcai_cron_index_batch');
+            as_schedule_single_action(time() + 5, 'wcai_cron_index_batch');
         } else {
             update_option('wcai_index_status', 'done');
             delete_option('wcai_index_offset');
