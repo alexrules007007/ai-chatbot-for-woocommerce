@@ -2631,24 +2631,53 @@ function wcai_page_license() {
                     <?php wp_nonce_field('wcai_license_action'); ?>
                     <button name="deactivate_license" class="button" style="background:#dc2626;color:#fff;border:none;">Deactivate</button>
                 </form>
-                <a href="https://chatbotagent.biz/my-account/" target="_blank"
+                <a href="https://chatbotagent.biz/my-account/licenses/" target="_blank"
                    style="background:#4F46E5;color:#fff;border:none;border-radius:6px;padding:6px 20px;text-decoration:none;font-weight:600;display:inline-block;font-size:13px;">
                     ⭐ Add Credits
                 </a>
             </div>
         </div>
-        <?php else: ?>
+                <?php else: ?>
         <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:18px;border-radius:10px;margin:16px 0;">
             <p style="margin:0 0 6px;"><strong>No active license</strong></p>
             <p style="margin:0;font-size:13px;color:#78350f;">Your domain: <code><?php echo esc_html($domain); ?></code></p>
         </div>
-        <form method="post" style="margin-top:16px;">
-            <?php wp_nonce_field('wcai_license_action'); ?>
-            <table class="form-table">
-                <tr><th>License Key</th><td><input type="text" name="license_key" class="regular-text" placeholder="WC-AI-XXXXXXXXXXXXXX"></td></tr>
-            </table>
-            <button name="activate_license" class="button button-primary">Activate</button>
-        </form>
+
+        <!-- 🆕 Кнопка Get License -->
+        <div style="background:linear-gradient(135deg,#4F46E5 0%,#7C3AED 100%);color:#fff;padding:24px 28px;border-radius:14px;margin:20px 0;box-shadow:0 8px 24px rgba(79,70,229,.25);">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;">
+                <div>
+                    <h3 style="margin:0 0 6px;color:#fff;font-size:18px;">🔑 Don't have a license yet?</h3>
+                    <p style="margin:0;font-size:13px;opacity:.9;">
+                        Get your license key in 1 minute. Instant activation, 24/7 support.
+                    </p>
+                </div>
+                <a href="https://chatbotagent.biz/my-account/licenses/" target="_blank" rel="noopener"
+                   style="background:#fff;color:#4F46E5;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.15);">
+                    🚀 Get License →
+                </a>
+            </div>
+        </div>
+
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin:20px 0;">
+            <h3 style="margin:0 0 14px;font-size:15px;">Already have a key? Activate it:</h3>
+            <form method="post">
+                <?php wp_nonce_field('wcai_license_action'); ?>
+                <table class="form-table" style="margin:0;">
+                    <tr>
+                        <th style="width:120px;">License Key</th>
+                        <td>
+                            <input type="text" name="license_key" class="regular-text"
+                                   placeholder="WC-AI-XXXXXXXXXXXXXX"
+                                   style="font-family:monospace;width:100%;max-width:400px;">
+                        </td>
+                    </tr>
+                </table>
+                <button name="activate_license" class="button button-primary" style="margin-top:8px;">
+                    ✅ Activate License
+                </button>
+            </form>
+        </div>
         <?php endif; ?>
     </div>
     <?php
