@@ -2,8 +2,8 @@
 /**
  * Plugin Name: AI Chatbot for WooCommerce
  * Plugin URI: https://chatbotagent.biz
- * Description: AI-powered product search for WooCommerce - v8.0.8
- * Version: 8.0.8
+ * Description: AI-powered product search for WooCommerce - v8.0.9
+ * Version: 8.0.9
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
  * Requires PHP: 7.4
@@ -16,7 +16,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('WCAI_VERSION', '8.0.8');
+define('WCAI_VERSION', '8.0.9');
 define('WCAI_SAAS_URL', 'https://chatbotagent.biz/wp-json/wc-ai/v1');
 define('WCAI_BATCH_SIZE', 20);
 define('WCAI_PATH', plugin_dir_path(__FILE__));
@@ -196,6 +196,7 @@ function wcai_install() {
         available_sizes TEXT,
         search_sizes TEXT,
         size_stock_data TEXT,
+        formats     TEXT,
         price       DECIMAL(10,2),
         price_max   DECIMAL(10,2),
         price_display VARCHAR(50),
@@ -229,6 +230,9 @@ function wcai_install() {
     }
     if (!in_array('price_max', $cols)) {
         $wpdb->query($wpdb->prepare("ALTER TABLE %i ADD COLUMN price_max DECIMAL(10,2) AFTER price", $pt));
+    }
+    if (!in_array('formats', $cols)) {
+        $wpdb->query($wpdb->prepare("ALTER TABLE %i ADD COLUMN formats TEXT AFTER size_stock_data", $pt));
     }
 
     $wpdb->query($wpdb->prepare("CREATE TABLE IF NOT EXISTS %i (
@@ -351,6 +355,251 @@ function wcai_is_license_active() {
     $s = wcai_get_license_status();
     return !empty($s['valid']) && !empty($s['credits']) && $s['credits'] > 0 && strtotime($s['expires_at']) > time();
 }
+function wcai_detect_fields($product_id, $product) {
+    $desc_raw   = ($product->get_description() ?: '') . ' ' . ($product->get_short_description() ?: '');
+    $desc_plain = wp_strip_all_tags($desc_raw);
+
+    $detect_field = function($field_aliases, $desc_regex = '', $attr_keyword = '') use ($product_id, $product, $desc_plain) {
+        foreach ($field_aliases as $key) {
+            $val = get_post_meta($product_id, $key, true);
+            if (!empty($val)) {
+                if (is_array($val)) return $val;
+                return array_values(array_filter(array_map('trim', preg_split('/[|,;]/', $val))));
+            }
+        }
+
+        if (!empty($attr_keyword) && method_exists($product, 'get_attributes')) {
+            $attributes = $product->get_attributes();
+            foreach ($attributes as $attr_name => $attr) {
+                if (strpos($attr_name, $attr_keyword) === false) continue;
+                if (method_exists($attr, 'get_options')) {
+                    $opts = $attr->get_options();
+                    if (!empty($opts) && is_array($opts)) return array_values($opts);
+                }
+                if (method_exists($attr, 'get_terms')) {
+                    $terms = $attr->get_terms();
+                    if (!empty($terms) && is_array($terms)) {
+                        return array_map(function($t) { return is_object($t) ? $t->name : $t; }, $terms);
+                    }
+                }
+            }
+        }
+
+if (!empty($desc_regex) && preg_match($desc_regex, $desc_plain, $m)) {
+    $raw = $m[1] ?? '';
+    $raw = preg_replace('/\.(?=[A-Z]{2,5}\b)/', '|', $raw);
+    $parts = array_filter(array_map('trim', preg_split('/[|,;\/\s]+/', $raw)));
+
+    $parts = array_filter($parts, function($p) {
+        $p = strtoupper(trim($p));
+        if (!preg_match('/^[A-Z0-9]{2,4}$/', $p)) return false;
+        if (strlen($p) === 2) return false;
+        if (strlen($p) === 4 && !preg_match('/[0-9]/', $p)) return false;
+        return true;
+    });
+
+    $parts = array_values(array_unique($parts));
+    if (!empty($parts)) return array_values($parts);
+}
+
+        return [];
+    };
+
+    $formats = $detect_field(
+    ['_formats', 'formats', 'pa_formats', '_pa_formats'],
+    '/(?:file\s+types?|files?\s+available|available\s+formats?|formats?\s+included|file\s+formats?\s+included|formats?|формат[ыа]?)\s*[:\-]\s*((?:\.?[A-Z]{2,5}\b[\s|,\/\.]*){2,})/is',
+    'format'
+);
+
+    $material_detected = $detect_field(
+    ['_material', 'material', 'pa_material', '_pa_material'],
+    '/(?:material|материал)\s*[:\-]\s*([A-Za-zА-Яа-яЁё0-9%][A-Za-zА-Яа-яЁё0-9%\-\/\s]{1,60}?)(?=[.;!?\n\r]|$)/iu',
+    'material'
+);
+$material_detected = is_array($material_detected) ? implode(', ', $material_detected) : '';
+$material_detected = trim($material_detected);
+
+if (!empty($material_detected)) {
+
+    $mat_lower = mb_strtolower($material_detected, 'UTF-8');
+
+    $known_materials = [
+        'cotton', 'polyester', 'silk', 'wool', 'linen', 'nylon', 'rayon',
+        'leather', 'suede', 'denim', 'velvet', 'satin', 'fleece', 'canvas',
+        'chiffon', 'lace', 'tulle', 'organza', 'viscose', 'spandex', 'elastane',
+        'acrylic', 'bamboo', 'hemp', 'jute', 'modal', 'lycra',
+        'microfiber', 'microfibre', 'cashmere', 'mohair', 'angora', 'alpaca',
+        'corduroy', 'tweed', 'flannel', 'terry', 'jersey', 'muslin', 'poplin',
+        'twill', 'felt',
+        'steel', 'stainless', 'aluminum', 'aluminium', 'copper', 'brass',
+        'iron', 'gold', 'silver', 'titanium', 'zinc', 'bronze', 'chrome',
+        'glass', 'plastic', 'silicone', 'rubber', 'acryl', 'abs', 'plexiglass',
+        'vinyl', 'pvc', 'eva', 'tpu', 'resin', 'foam', 'sponge',
+        'wood', 'oak', 'pine', 'walnut', 'birch', 'maple', 'mahogany', 'teak',
+        'paper', 'cardboard', 'ceramic', 'porcelain', 'clay', 'stone', 'marble',
+        'carbon', 'metal', 'mesh',
+    ];
+
+    $material_qualifiers = [
+        'faux',
+        'genuine',
+        'synthetic',
+        'organic',
+        'recycled',
+        'natural',
+        'vegan',
+        'solid',
+        'stainless',
+        'coated',
+        'laminated',
+        'rubberized',
+        'woven',
+        'knit',
+        'knitted',
+        'nonwoven',
+        'non-woven',
+        'blend',
+        'fabric',
+        'fiber',
+        'fibre',
+    ];
+
+    $not_materials = [
+        'use', 'using', 'used', 'you', 'your', 'yours',
+        'and', 'or', 'the', 'a', 'an',
+        'in', 'on', 'at', 'to', 'for', 'of',
+        'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'have', 'has', 'had',
+        'do', 'does', 'did',
+        'will', 'would', 'should', 'could', 'can', 'may', 'might',
+        'must', 'shall',
+        'we', 'our', 'ours',
+        'it', 'its',
+        'this', 'that', 'these', 'those',
+        'add', 'with', 'from', 'into', 'onto', 'by', 'as',
+        'not', 'no', 'yes',
+        'all', 'any', 'some', 'more', 'most', 'other', 'such',
+        'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just',
+        'but', 'if', 'then',
+        'her', 'him', 'his', 'she', 'he',
+        'they', 'them', 'their',
+        'there', 'here',
+        'when', 'where', 'which', 'what', 'who', 'how', 'why',
+        'because', 'also',
+        'about', 'after', 'before', 'during', 'between',
+        'through', 'under', 'over', 'above', 'below',
+        'made', 'make', 'makes', 'madeof',
+    ];
+
+    $mat_words = preg_split(
+        '/[\s,;\/|]+/u',
+        $mat_lower,
+        -1,
+        PREG_SPLIT_NO_EMPTY
+    );
+
+    $mat_words = array_map(function ($w) {
+        return trim(
+            preg_replace('/[^a-zа-яё0-9%\-]/u', '', $w)
+        );
+    }, $mat_words);
+
+    $mat_words = array_values(
+        array_filter($mat_words)
+    );
+
+    $has_known_material = false;
+    $invalid_word = false;
+
+    foreach ($mat_words as $w) {
+
+        if (preg_match('/^\d{1,3}%?$/', $w)) {
+            continue;
+        }
+
+        if (in_array($w, $known_materials, true)) {
+            $has_known_material = true;
+            continue;
+        }
+
+        if (in_array($w, $material_qualifiers, true)) {
+            continue;
+        }
+
+        if (in_array($w, $not_materials, true)) {
+            $invalid_word = true;
+            break;
+        }
+
+        $invalid_word = true;
+        break;
+    }
+
+    if (!$has_known_material || $invalid_word) {
+        $material_detected = '';
+    } else {
+
+        $material_detected = preg_replace(
+            '/\s+/u',
+            ' ',
+            $material_detected
+        );
+
+        $material_detected = trim($material_detected);
+
+        if (count($mat_words) > 6) {
+            $material_detected = '';
+        }
+    }
+}
+$material_detected = is_array($material_detected) ? implode(', ', $material_detected) : '';
+$material_detected = trim($material_detected);
+if (!empty($material_detected)) {
+    $words = preg_split('/\s+/u', $material_detected, -1, PREG_SPLIT_NO_EMPTY);
+    if (count($words) > 3 || mb_strlen($material_detected, 'UTF-8') > 40) {
+        $material_detected = '';
+    }
+}
+
+    $colors_detected = $detect_field(
+        ['_colors', 'colors', 'color', 'pa_colors', 'pa_color', '_pa_color'],
+        '/(?:colou?rs?|цвет[аы]?)\s*[:\-]\s*([^\n\r.]{2,100})/iu',
+        'color'
+    );
+
+    $sizes_detected = $detect_field(
+        ['_sizes', 'sizes', 'pa_sizes', '_pa_sizes'],
+        '/(?:sizes?|размер[ыа]?)\s*[:\-]\s*([^\n\r.]{2,200})/iu',
+        'size'
+    );
+
+    $stitches_detected = 0;
+    foreach (['_stitches', 'stitches', 'pa_stitches'] as $key) {
+        $val = get_post_meta($product_id, $key, true);
+        if (!empty($val) && is_numeric($val)) { $stitches_detected = (int)$val; break; }
+    }
+    if ($stitches_detected === 0 && preg_match('/(?:stitches|стежк[иов]+)\s*[:\-]?\s*([\d,]+)/i', $desc_plain, $m)) {
+        $stitches_detected = (int)str_replace(',', '', $m[1]);
+    }
+
+    $difficulty_detected = '';
+    foreach (['_difficulty', 'difficulty', 'pa_difficulty'] as $key) {
+        $val = get_post_meta($product_id, $key, true);
+        if (!empty($val)) { $difficulty_detected = $val; break; }
+    }
+    if (empty($difficulty_detected) && preg_match('/(?:difficulty|сложность)\s*[:\-]\s*([^\n\r.]{2,30})/iu', $desc_plain, $m)) {
+        $difficulty_detected = trim($m[1]);
+    }
+
+    return [
+        'formats'    => is_array($formats) ? $formats : [],
+        'material'   => $material_detected,
+        'colors'     => is_array($colors_detected) ? $colors_detected : [],
+        'sizes'      => is_array($sizes_detected) ? $sizes_detected : [],
+        'stitches'   => $stitches_detected,
+        'difficulty' => $difficulty_detected,
+    ];
+}
 
 function wcai_index_product($product_id) {
     global $wpdb;
@@ -385,23 +634,16 @@ function wcai_index_product($product_id) {
         $price_display = number_format($price, 2);
     }
 
-    $available_sizes = [];
-    if (method_exists($product, 'get_attributes')) {
-        $attributes = $product->get_attributes();
-        foreach ($attributes as $attr_name => $attr) {
-            if (strpos($attr_name, 'size') !== false ||
-                strpos($attr_name, 'размер') !== false ||
-                strpos($attr_name, 'pa_size') !== false) {
-                if (method_exists($attr, 'get_options')) {
-                    $options = $attr->get_options();
-                    if (!empty($options) && is_array($options)) {
-                        $available_sizes = array_values($options);
-                        break;
-                    }
-                }
-            }
-        }
-    }
+    $detected = wcai_detect_fields($product_id, $product);
+
+    $formats             = $detected['formats'];
+    $material_detected   = $detected['material'];
+    $colors_detected     = $detected['colors'];
+    $sizes_detected      = $detected['sizes'];
+    $stitches_detected   = $detected['stitches'];
+    $difficulty_detected = $detected['difficulty'];
+
+    $available_sizes = is_array($sizes_detected) ? $sizes_detected : [];
 
     if (empty($available_sizes) && $product->is_type('variable')) {
         $variations = $product->get_children();
@@ -419,13 +661,19 @@ function wcai_index_product($product_id) {
         $available_sizes = $sizes;
     }
 
-    $material = get_post_meta($product_id, '_material', true);
+    $material = $material_detected;
+    if (empty($material)) $material = get_post_meta($product_id, '_material', true);
     if (empty($material)) $material = get_post_meta($product_id, 'pa_material', true);
     if (empty($material) && !empty($brand)) $material = $brand;
 
-    $colors = (int)get_post_meta($product_id, '_colors', true);
-    $stitches = (int)get_post_meta($product_id, '_stitches', true);
-    $difficulty = get_post_meta($product_id, '_difficulty', true);
+    $colors = is_array($colors_detected) && count($colors_detected) > 0
+        ? count($colors_detected)
+        : (int)get_post_meta($product_id, '_colors', true);
+
+    $stitches = $stitches_detected ?: (int)get_post_meta($product_id, '_stitches', true);
+
+    $difficulty = $difficulty_detected;
+    if (empty($difficulty)) $difficulty = get_post_meta($product_id, '_difficulty', true);
     if (empty($difficulty)) $difficulty = get_post_meta($product_id, 'pa_difficulty', true);
 
     $search_sizes = array_values(array_unique(array_map('strtolower', $available_sizes)));
@@ -444,6 +692,7 @@ function wcai_index_product($product_id) {
         'available_sizes' => !empty($available_sizes) ? json_encode($available_sizes) : null,
         'search_sizes' => !empty($search_sizes) ? json_encode($search_sizes) : null,
         'size_stock_data' => null,
+        'formats'      => !empty($formats) ? json_encode($formats) : null,
         'price'        => $price,
         'regular_price'=> (float)$product->get_regular_price(),
         'price_max'    => $price_max,
@@ -517,6 +766,24 @@ function wcai_index_product($product_id) {
 
     if ($difficulty) $terms[strtolower($difficulty)] = ($terms[strtolower($difficulty)] ?? 0) + 10;
 
+    if (!empty($formats)) {
+        foreach ($formats as $fmt) {
+            $fmt_lower = strtolower(trim($fmt));
+            if (strlen($fmt_lower) > 1) {
+                $terms[$fmt_lower] = ($terms[$fmt_lower] ?? 0) + 18;
+            }
+        }
+    }
+
+    if (!empty($colors_detected) && is_array($colors_detected)) {
+        foreach ($colors_detected as $color_name) {
+            $color_lower = strtolower(trim($color_name));
+            if (strlen($color_lower) > 1) {
+                $terms[$color_lower] = ($terms[$color_lower] ?? 0) + 12;
+            }
+        }
+    }
+
     if ($description_lower) {
         $desc_words = wcai_tokenize($description_lower);
         $desc_words = array_slice(array_unique($desc_words), 0, 900);
@@ -584,7 +851,6 @@ function wcai_index_product($product_id) {
         }
     }
 }
-
 add_action('wcai_cron_index_batch', 'wcai_cron_index_batch_handler');
 if (!function_exists('wcai_cron_index_batch_handler')) {
     function wcai_cron_index_batch_handler() {
@@ -793,12 +1059,14 @@ function wcai_search(
     $offset = max(0, (int)$offset);
 
     $has_filters = !empty($category) || !empty($color) || !empty($size) ||
-                   !empty($brand) || $min_price !== null || $max_price !== null ||
-                   $in_stock === true || $on_sale === true;
+               !empty($brand) || !empty($material) ||
+               $min_price !== null || $max_price !== null ||
+               $in_stock === true || $on_sale === true ||
+               !empty($sort_by);
 
-    if (empty($search_text) && !$has_filters) {
-        return ['products' => [], 'count' => 0, 'has_more' => false, 'offset' => 0, 'next_offset' => null, 'limit' => $limit];
-    }
+if (empty($search_text) && !$has_filters) {
+    return ['products' => [], 'count' => 0, 'has_more' => false, 'offset' => 0, 'next_offset' => null, 'limit' => $limit];
+}
 
     $search_clean = trim($search_text);
     $search_clean = preg_replace('/^SKU:\s*/i', '', $search_clean);
@@ -861,19 +1129,29 @@ function wcai_search(
         }
     }
     if (empty($search_clean) && $has_filters) {
-        $sql = "SELECT product_id FROM $pt";
-        if (!empty($where_clause)) $sql .= " " . $where_clause;
-        $sql .= " ORDER BY sales_count DESC LIMIT 200";
-        $results = !empty($where_params)
-            ? $wpdb->get_results($wpdb->prepare($sql, $where_params))
-            : $wpdb->get_results($sql);
-        if ($results) {
-            foreach ($results as $r) {
-                $id = (int)$r->product_id;
-                if (!in_array($id, $seen_ids)) { $seen_ids[] = $id; $all_product_ids[] = $id; }
-            }
+    $order_sql = " ORDER BY sales_count DESC ";
+    if (!empty($sort_by)) {
+        if ($sort_by === 'price_low')       $order_sql = " ORDER BY price ASC ";
+        elseif ($sort_by === 'price_high')  $order_sql = " ORDER BY price_max DESC ";
+        elseif ($sort_by === 'rating')      $order_sql = " ORDER BY rating DESC, rating_count DESC ";
+        elseif ($sort_by === 'popularity')  $order_sql = " ORDER BY sales_count DESC, is_bestseller DESC ";
+    }
+
+    $sql = "SELECT product_id FROM $pt";
+    if (!empty($where_clause)) $sql .= " " . $where_clause;
+    $sql .= $order_sql . " LIMIT 200";
+
+    $results = !empty($where_params)
+        ? $wpdb->get_results($wpdb->prepare($sql, $where_params))
+        : $wpdb->get_results($sql);
+
+    if ($results) {
+        foreach ($results as $r) {
+            $id = (int)$r->product_id;
+            if (!in_array($id, $seen_ids)) { $seen_ids[] = $id; $all_product_ids[] = $id; }
         }
     }
+}
     if (!empty($words)) {
         $words = array_slice($words, 0, 10);
         $term_placeholders = implode(',', array_fill(0, count($words), '%s'));
@@ -976,7 +1254,6 @@ function wcai_search(
         'limit' => $limit,
     ];
 }
-
 function wcai_format_products($results, $override_currency = null) {
     global $wpdb;
     $currency = $override_currency ?: wcai_get_active_currency();
@@ -1008,36 +1285,30 @@ function wcai_format_products($results, $override_currency = null) {
 
         $available_sizes = [];
         $sizes_data = $p->available_sizes ?? null;
-		$formats = [];
-$formats_data = $p->formats ?? null;
-if ($formats_data) {
-    try {
-        $formats_arr = json_decode($formats_data, true);
-        if (is_array($formats_arr)) $formats = $formats_arr;
-    } catch (Exception $e) { $formats = []; }
-}
+
+        $formats = [];
+        $formats_data = $p->formats ?? null;
+        if ($formats_data) {
+            $decoded = json_decode($formats_data, true);
+            if (is_array($decoded)) $formats = $decoded;
+        }
+
         if ($sizes_data) {
-            try {
-                $sizes = json_decode($sizes_data, true);
-                if (is_array($sizes)) {
-                    foreach ($sizes as $size) {
-                        if (is_numeric($size)) {
-                            $term = get_term((int)$size);
-                            if ($term && !is_wp_error($term) && $term->name) $available_sizes[] = $term->name;
-                            else $available_sizes[] = $size;
-                        } else {
-                            $available_sizes[] = $size;
-                        }
+            $sizes = json_decode($sizes_data, true);
+            if (is_array($sizes)) {
+                foreach ($sizes as $size) {
+                    if (is_numeric($size)) {
+                        $term = get_term((int)$size);
+                        if ($term && !is_wp_error($term) && $term->name) $available_sizes[] = $term->name;
+                        else $available_sizes[] = $size;
+                    } else {
+                        $available_sizes[] = $size;
                     }
                 }
-            } catch (Exception $e) { $available_sizes = []; }
+            }
         }
 
         $description = $p->description ?? '';
-        if (!empty($available_sizes)) {
-            $description = '📏 SIZES: ' . implode(', ', $available_sizes) . '. ' . $description;
-        }
-
         $out[] = [
             'id'                => $p->product_id,
             'name'              => $p->title ?: 'Product',
@@ -1063,8 +1334,8 @@ if ($formats_data) {
             'category'          => $p->category,
             'description'       => $description,
             'available_sizes'   => $available_sizes,
+            'formats'           => $formats,
             'material'          => $p->material ?? '',
-			'formats'           => $formats,
             'colors'            => (int)($p->colors ?? 0),
             'stitches'          => (int)($p->stitches ?? 0),
             'difficulty'        => $p->difficulty ?? '',
@@ -1074,7 +1345,6 @@ if ($formats_data) {
     }
     return $out;
 }
-
 
 add_action('rest_api_init', function () {
     register_rest_route('wc-ai/v1', '/search', [
@@ -1096,8 +1366,10 @@ add_action('rest_api_init', function () {
             $on_sale = isset($params['on_sale']) ? (bool)$params['on_sale'] : null;
             $material = $params['material'] ?? null;
 
-            $has_filters = !empty($category) || !empty($color) || !empty($size) ||
-                           !empty($brand) || $min_price || $max_price || $in_stock || $on_sale;
+                        $has_filters = !empty($category) || !empty($color) || !empty($size) ||
+                           !empty($brand) || !empty($material) ||
+                           $min_price || $max_price || $in_stock || $on_sale ||
+                           !empty($sort_by);
 
             if (empty($search_text) && !$has_filters) {
                 return new WP_REST_Response(['products' => [], 'count' => 0, 'has_more' => false, 'offset' => 0, 'next_offset' => null], 200);
@@ -1146,10 +1418,11 @@ add_action('rest_api_init', function () {
 
             $groups = [];
             $seen_all_ids = [];
-            $has_any_filter = !empty($category) || !empty($color) || !empty($size) ||
+                        $has_any_filter = !empty($category) || !empty($color) || !empty($size) ||
                   !empty($brand) || !empty($material) ||
                   $min_price !== null || $max_price !== null ||
-                  $in_stock === true || $on_sale === true;
+                  $in_stock === true || $on_sale === true ||
+                  !empty($sort_by);
 
             foreach ($keywords as $keyword) {
                 $keyword = trim((string)$keyword);
@@ -1666,7 +1939,6 @@ add_action('rest_api_init', function () {
     ]);
 });
 
-
 add_action('wp_ajax_wcai_send', 'wcai_ajax_send_with_tracking', 5);
 add_action('wp_ajax_nopriv_wcai_send', 'wcai_ajax_send_with_tracking', 5);
 
@@ -1878,7 +2150,6 @@ function wcai_log_query_with_tracking($query, $reply, $products, $credits_used, 
     global $wpdb;
     $table = $wpdb->prefix . 'wcai_logs';
 
-    // Логируем товары только если в HTML-ответе есть грид
     if (!empty($reply_html) && strpos($reply_html, 'wcai-product-grid') === false) {
         $products = [];
     }
@@ -1917,7 +2188,6 @@ function wcai_log_query_with_tracking($query, $reply, $products, $credits_used, 
 
     $wpdb->insert($table, $data);
 }
-
 add_action('wp_ajax_wcai_send', 'wcai_local_sku_intercept', 1);
 add_action('wp_ajax_nopriv_wcai_send', 'wcai_local_sku_intercept', 1);
 
@@ -2031,6 +2301,25 @@ function wcai_local_sku_not_found_message($sku) {
     if (empty($msg)) $msg = 'Product with code ' . $sku . ' not found.';
     return $msg;
 }
+function wcai_get_no_reviews_text() {
+    $locale = get_locale();
+    $map = [
+        'zh_CN' => '暂无评价',
+        'zh_TW' => '暫無評價',
+        'ja'    => 'レビューなし',
+        'ko_KR' => '리뷰 없음',
+        'ru_RU' => 'Нет отзывов',
+        'de_DE' => 'Noch keine Bewertungen',
+        'fr_FR' => 'Aucun avis',
+        'es_ES' => 'Sin reseñas',
+        'th'    => 'ยังไม่มีรีวิว',
+        'he_IL' => 'אין ביקורות',
+    ];
+    foreach ($map as $prefix => $text) {
+        if (strpos($locale, $prefix) === 0) return $text;
+    }
+    return 'No reviews yet';
+}
 
 function wcai_local_sku_format_grid($products, $symbol) {
     if (empty($products)) return '';
@@ -2079,7 +2368,9 @@ function wcai_local_sku_format_grid($products, $symbol) {
             <div style="padding:10px 12px;">
                 <div style="font-size:12px;font-weight:600;color:#1f2937;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;height:32px;">' . esc_html($name) . '</div>
                 <div style="font-size:13px;font-weight:700;margin-top:4px;">' . $price_html . '</div>
-                <div style="font-size:11px;color:#6b7280;">⭐ ' . number_format($rating, 1) . ' (' . number_format($rating_count) . ')</div>
+                ' . ($rating_count > 0 
+    ? '<div style="font-size:11px;color:#6b7280;">⭐ ' . number_format($rating, 1) . ' (' . number_format($rating_count) . ')</div>'
+    : '<div style="font-size:11px;color:#9ca3af;">' . esc_html(wcai_get_no_reviews_text()) . '</div>') . '
                 <div style="display:flex;gap:6px;margin-top:8px;">
                     <a href="' . esc_url($buy_url) . '" target="_blank" rel="noopener noreferrer" style="flex:1;text-align:center;background:#22c55e;color:#fff;text-decoration:none;font-size:11px;padding:6px 0;border-radius:20px;font-weight:600;">' . $btn_text . '</a>
                 </div>
@@ -2274,7 +2565,6 @@ add_action('init', function() {
     }
 }, 1);
 
-
 add_action('admin_menu', function () {
     add_menu_page('AI Chatbot', '🤖 AI Chatbot', 'manage_options', 'wcai', 'wcai_page_license', 'dashicons-format-chat', 56);
     add_submenu_page('wcai', 'License',   '🔑 License',   'manage_options', 'wcai',          'wcai_page_license');
@@ -2288,12 +2578,10 @@ add_action('admin_menu', function () {
     add_submenu_page('wcai', 'Diagnostics', '🔧 Diagnostics', 'manage_options', 'wcai-diagnostics', 'wcai_page_diagnostics');
 });
 
-
 add_action('admin_enqueue_scripts', function($hook) {
     if (strpos($hook, 'wcai') === false) return;
     wp_enqueue_script('wcai-admin', WCAI_URL . 'assets/admin.js', ['jquery'], WCAI_VERSION, true);
 });
-
 
 function wcai_page_license() {
     delete_transient('wcai_license_cache');
@@ -2365,7 +2653,6 @@ function wcai_page_license() {
     </div>
     <?php
 }
-
 
 function wcai_page_index() {
     global $wpdb;
@@ -2709,7 +2996,6 @@ function wcai_page_design() {
     </div>
     <?php
 }
-
 function wcai_page_logs() {
     global $wpdb;
     $table = $wpdb->prefix . 'wcai_logs';
@@ -3461,14 +3747,13 @@ add_action('admin_init', function () {
         'description'     => "TEXT AFTER category",
         'material'        => "VARCHAR(100) AFTER description",
         'colors'          => "INT DEFAULT 0 AFTER material",
-        'stitches'        => "INT DEFAULT 0 AFTER stitches_dummy",
         'difficulty'      => "VARCHAR(50) AFTER stitches",
         'available_sizes' => "TEXT AFTER difficulty",
         'search_sizes'    => "TEXT AFTER available_sizes",
         'size_stock_data' => "TEXT AFTER search_sizes",
+        'formats'         => "TEXT AFTER size_stock_data",
         'price_display'   => "VARCHAR(50) AFTER price_max",
     ];
-    unset($needed['stitches']); // уже есть
 
     foreach ($needed as $col => $def) {
         if (!in_array($col, $cols)) {
@@ -3677,7 +3962,9 @@ function wcai_shortcode() {
     if ($d['glass_effect']) $shadow = '0 8px 32px rgba(31, 38, 135, .2)';
     $header_title = $d['header_title'] !== '' ? $d['header_title'] : get_option('wcai_store_name', get_bloginfo('name'));
     $online_badge = !empty($d['show_online_badge']);
-
+    $input_bg     = $dark ? '#374151' : '#fff';
+$input_text   = $dark ? '#f3f4f6' : '#111827';
+$input_border = $dark ? '#4b5563' : '#e5e7eb';
     wp_enqueue_style('wcai-widget', WCAI_URL . 'assets/widget.css', [], WCAI_VERSION);
     wp_enqueue_script('wcai-widget', WCAI_URL . 'assets/widget.js', [], WCAI_VERSION, true);
 
@@ -3697,7 +3984,7 @@ function wcai_shortcode() {
             </div>
             <div id="wcai-msgs" style="flex:1;overflow-y:auto;padding:14px;background:<?php echo esc_attr($bg_color); ?>;display:flex;flex-direction:column;gap:10px;"></div>
             <div style="display:flex;padding:10px;border-top:1px solid #e5e7eb;background:<?php echo esc_attr($box_bg); ?>;gap:7px;flex-shrink:0;">
-                <input id="wcai-input" type="text" placeholder="<?php echo esc_attr(get_option('wcai_input_placeholder', 'Ask about products…')); ?>" style="flex:1;padding:9px 13px;border:1px solid #e5e7eb;background:#fff;color:#111827;border-radius:22px;outline:none;font-size:14px;font-family:<?php echo esc_attr($font_stack); ?>;">
+                <input id="wcai-input" type="text" placeholder="<?php echo esc_attr(get_option('wcai_input_placeholder', 'Ask about products…')); ?>" style="flex:1;padding:9px 13px;border:1px solid <?php echo esc_attr($input_border); ?>;background:<?php echo esc_attr($input_bg); ?>;color:<?php echo esc_attr($input_text); ?>;border-radius:22px;outline:none;font-size:14px;font-family:<?php echo esc_attr($font_stack); ?>;">
                 <button id="wcai-send" style="background:<?php echo esc_attr($pc); ?>;color:#fff;border:none;border-radius:22px;padding:8px 18px;cursor:pointer;font-weight:600;font-size:14px;">Send</button>
             </div>
         </div>
@@ -3971,3 +4258,21 @@ function wcai_enrich_catalog_info_variations($catalog_info) {
     if (!empty($top_categories)) $catalog_info .= "Top categories: " . implode(', ', $top_categories) . "\n";
     return $catalog_info;
 }
+add_action('wp_footer', function() {
+    if (!get_option('wcai_show_chatbot', 1)) return;
+    ?>
+    <style>
+    #wcai-box .wcai-foot input,
+    #wcai-box #wcai-input {
+        background: var(--wcai-input-bg, #fff) !important;
+        color: var(--wcai-input-text, #111827) !important;
+        -webkit-text-fill-color: var(--wcai-input-text, #111827) !important;
+    }
+    #wcai-box .wcai-foot input::placeholder,
+    #wcai-box #wcai-input::placeholder {
+        color: var(--wcai-input-text, #9ca3af) !important;
+        opacity: 0.6 !important;
+    }
+    </style>
+    <?php
+}, 999999);
