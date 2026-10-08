@@ -1945,10 +1945,10 @@ function wcai_search(
         $where_conditions[] = "price_max >= %f";
         $where_params[] = (float)$min_price;
     }
-    if ($max_price !== null && $max_price > 0) {
-        $where_conditions[] = "price <= %f";
-        $where_params[] = (float)$max_price;
-    }
+if ($max_price !== null && $max_price >= 0) {
+    $where_conditions[] = "price <= %f";
+    $where_params[] = (float)$max_price;
+}
     if ($in_stock === true) $where_conditions[] = "stock_status = 'instock'";
     if ($on_sale === true) $where_conditions[] = "is_on_sale = 1";
 
@@ -4327,8 +4327,19 @@ function wcai_render_analytics_page() {
         FROM %i
     ", $table));
 
-    $leads = (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM %i WHERE lead_converted = 1", $table));
-    $conversion_rate = ($totals && $totals->total_requests > 0 && $leads > 0) ? round(($leads / $totals->total_requests) * 100, 1) : 0;
+$leads = (int)$wpdb->get_var($wpdb->prepare(
+    "SELECT COUNT(DISTINCT COALESCE(NULLIF(user_email_hash,''), NULLIF(user_ip_hash,'')))
+     FROM %i WHERE lead_converted = 1",
+    $table
+));
+
+$unique_visitors = (int)$wpdb->get_var($wpdb->prepare(
+    "SELECT COUNT(DISTINCT COALESCE(NULLIF(user_email_hash,''), NULLIF(user_ip_hash,'')))
+     FROM %i WHERE user_ip_hash != '' OR user_email_hash != ''",
+    $table
+));
+
+$conversion_rate = ($unique_visitors > 0) ? round(($leads / $unique_visitors) * 100, 1) : 0;
 
     $real_orders = 0;
     if (class_exists('WooCommerce')) {
@@ -4375,10 +4386,13 @@ function wcai_render_analytics_page() {
                 <div style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:4px;"><?php echo esc_html(number_format($totals->avg_response_time ?? 0, 2)); ?>s</div>
             </div>
             <div style="background:#fff;padding:16px 20px;border-radius:12px;border:1px solid #e5e7eb;<?php echo $leads > 0 ? 'border-color:#22c55e;' : ''; ?>">
-                <div style="font-size:12px;color:#6b7280;font-weight:600;text-transform:uppercase;">🎯 Leads</div>
-                <div style="font-size:24px;font-weight:700;color:<?php echo $leads > 0 ? '#22c55e' : '#9ca3af'; ?>;margin-top:4px;"><?php echo esc_html(number_format($leads)); ?></div>
-                <div style="font-size:12px;color:#6b7280;margin-top:4px;">📊 Conversion: <?php echo esc_html($conversion_rate); ?>%</div>
-            </div>
+    <div style="font-size:12px;color:#6b7280;font-weight:600;text-transform:uppercase;">🎯 Leads</div>
+    <div style="font-size:24px;font-weight:700;color:<?php echo $leads > 0 ? '#22c55e' : '#9ca3af'; ?>;margin-top:4px;"><?php echo esc_html(number_format($leads)); ?></div>
+    <div style="font-size:12px;color:#6b7280;margin-top:4px;">
+        📊 Conversion: <strong><?php echo esc_html($conversion_rate); ?>%</strong>
+        <span style="color:#9ca3af;">(<?php echo esc_html(number_format($leads)); ?> of <?php echo esc_html(number_format($unique_visitors)); ?> visitors)</span>
+    </div>
+</div>
         </div>
         <?php if ($top_queries): ?>
             <div style="background:#fff;padding:16px 20px;border-radius:12px;border:1px solid #e5e7eb;margin:20px 0;">
