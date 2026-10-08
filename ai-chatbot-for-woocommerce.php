@@ -22,8 +22,8 @@ define('WCAI_BATCH_SIZE', 20);
 define('WCAI_PATH', plugin_dir_path(__FILE__));
 define('WCAI_URL',  plugin_dir_url(__FILE__));
 define('WCAI_UPDATE_SLUG', 'ai-chatbot-woocommerce');
-define('WCAI_UPDATE_MANIFEST', 'https://chatbotagent.biz/wp-content/uploads/client-updates/ai-chatbot-woocommerce.json');
-define('WCAI_UPDATE_ZIP', 'https://chatbotagent.biz/wp-content/uploads/client-updates/ai-chatbot-woocommerce.zip');
+define('WCAI_UPDATE_MANIFEST', 'https://chatbotagent.biz/wp-content/uploads/client-update/ai-chatbot-woocommerce.json');
+define('WCAI_UPDATE_ZIP', 'https://chatbotagent.biz/wp-content/uploads/client-update/ai-chatbot-woocommerce.zip');
 
 define('WCAI_MAPPING_VERSION', 1);
 define('WCAI_CONFIDENCE_AUTO', 0.80);
@@ -3210,10 +3210,7 @@ if (in_array('user_email_hash', $columns)) {
 } elseif (in_array('user_email', $columns)) {
     $data['user_email'] = $email_hash;
     $data['user_ip']    = $ip_hash;
-} elseif (in_array('user_email', $columns)) {
-        $data['user_email'] = '';
-        $data['user_ip'] = '';
-    }
+}
 
     $wpdb->insert($table, $data);
 }
@@ -4946,10 +4943,53 @@ add_filter('upgrader_source_selection', function ($source, $remote_source, $upgr
 }, 10, 4);
 
 add_filter('plugin_action_links_' . plugin_basename(__FILE__), function ($links) {
-    $response = wp_remote_head(WCAI_UPDATE_ZIP, ['timeout' => 10, 'sslverify' => false]);
-    if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) == 200) {
-        $links[] = sprintf('<a href="%s" target="_blank">⬇ Download Update</a>', esc_url(WCAI_UPDATE_ZIP));
+
+    $zip_url   = WCAI_UPDATE_ZIP;
+    $cache_key = 'wcai_zip_available_' . md5($zip_url);
+    $zip_ok    = get_transient($cache_key);
+
+    if ($zip_ok === false) {
+
+        $head = wp_remote_head($zip_url, [
+            'timeout'     => 8,
+            'sslverify'   => true,
+            'redirection' => 5,
+        ]);
+
+        $code = is_wp_error($head)
+            ? 0
+            : (int) wp_remote_retrieve_response_code($head);
+
+        if ($code >= 200 && $code < 300) {
+            $zip_ok = '1';
+        } else {
+
+            $get = wp_remote_get($zip_url, [
+                'timeout'     => 8,
+                'sslverify'   => true,
+                'redirection' => 5,
+                'headers'     => [
+                    'Range' => 'bytes=0-0',
+                ],
+            ]);
+
+            $code = is_wp_error($get)
+                ? 0
+                : (int) wp_remote_retrieve_response_code($get);
+
+            $zip_ok = in_array($code, [200, 206], true) ? '1' : '0';
+        }
+
+        set_transient($cache_key, $zip_ok, 30 * MINUTE_IN_SECONDS);
     }
+
+    if ($zip_ok === '1') {
+        $links[] = sprintf(
+            '<a href="%s" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;font-weight:600;">⬇ Download Update</a>',
+            esc_url($zip_url)
+        );
+    }
+
     return $links;
 });
 
