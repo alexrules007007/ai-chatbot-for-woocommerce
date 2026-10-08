@@ -3185,10 +3185,32 @@ function wcai_log_query_with_tracking($query, $reply, $products, $credits_used, 
 
     if (in_array('session_id', $columns)) $data['session_id'] = $session_id;
 
-    if (in_array('user_email_hash', $columns)) {
-        $data['user_email_hash'] = '';
-        $data['user_ip_hash'] = '';
-    } elseif (in_array('user_email', $columns)) {
+    $gdpr_enabled = (int) get_option('wcai_gdpr_enabled', 1);
+$ip_hash = '';
+$email_hash = '';
+
+if ($gdpr_enabled) {
+    $ip = wcai_get_real_ip();
+    if (!empty($ip)) $ip_hash = wcai_hash_for_analytics($ip);
+    if (is_user_logged_in()) {
+        $u = wp_get_current_user();
+        if (!empty($u->user_email)) $email_hash = wcai_hash_for_analytics($u->user_email);
+    }
+} else {
+    $ip_hash = wcai_get_real_ip();
+    if (is_user_logged_in()) {
+        $u = wp_get_current_user();
+        $email_hash = $u->user_email ?? '';
+    }
+}
+
+if (in_array('user_email_hash', $columns)) {
+    $data['user_email_hash'] = $email_hash;
+    $data['user_ip_hash']    = $ip_hash;
+} elseif (in_array('user_email', $columns)) {
+    $data['user_email'] = $email_hash;
+    $data['user_ip']    = $ip_hash;
+} elseif (in_array('user_email', $columns)) {
         $data['user_email'] = '';
         $data['user_ip'] = '';
     }
@@ -3485,11 +3507,16 @@ function wcai_convert_leads_on_order($order_id) {
     $ip_hash = '';
 
     if ($gdpr_enabled) {
-        $email = $order->get_billing_email();
-        if (!empty($email)) $email_hash = wcai_hash_for_analytics($email);
+        $email = '';
+if (is_user_logged_in()) {
+    $u = wp_get_current_user();
+    $email = $u->user_email ?? '';
+}
+if (empty($email)) $email = $order->get_billing_email();
+if (!empty($email)) $email_hash = wcai_hash_for_analytics($email);
 
-        $ip = $order->get_customer_ip_address() ?: ($_SERVER['REMOTE_ADDR'] ?? '');
-        if (!empty($ip)) $ip_hash = wcai_hash_for_analytics($ip);
+$ip = wcai_get_real_ip();  // тот же источник, что и в чате!
+if (!empty($ip)) $ip_hash = wcai_hash_for_analytics($ip);
     }
 
     $converted = 0;
@@ -3530,6 +3557,26 @@ function wcai_convert_leads_on_order($order_id) {
                 'lead_converted' => 1, 'created_at' => current_time('mysql')
             ]);
         }
+		if ($converted == 0) {
+    $order_ip = wcai_get_real_ip();
+    if (!empty($order_ip)) {
+        $ip_hash_check = wcai_hash_for_analytics($order_ip);
+        $recent = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $table
+             WHERE user_ip_hash = %s
+               AND lead_converted = 0
+               AND created_at > DATE_SUB(NOW(), INTERVAL 2 HOUR)",
+            $ip_hash_check
+        ));
+        if ($recent > 0) {
+            $wpdb->update($table,
+                ['lead_converted' => 1],
+                ['user_ip_hash' => $ip_hash_check, 'lead_converted' => 0]
+            );
+            $converted = $recent;
+        }
+    }
+}
     }
 }
 
