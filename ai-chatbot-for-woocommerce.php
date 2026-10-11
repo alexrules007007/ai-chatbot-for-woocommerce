@@ -7,7 +7,7 @@
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
  * Requires PHP: 7.4
- * Author: chatbotagent.biz
+ * Author: Conversum SIA
  * Author URI: https://chatbotagent.biz
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
