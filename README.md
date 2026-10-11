@@ -4,7 +4,7 @@
 
 Download the latest `ai-chatbot-for-woocommerce.zip` from your account:
 
-👉 **[chatbotagent.biz/my-account](https://chatbotagent.biz/)**
+👉 **[chatbotagent.biz/](https://chatbotagent.biz/)**
 
 ### Install in WordPress
 
