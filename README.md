@@ -31,4 +31,4 @@ This repository contains the **source code for review only**.
 To install the plugin, use the official ZIP from your account page.
 
 - 🔓 [View source code on GitHub](https://github.com/alexrules007007/ai-chatbot-for-woocommerce)
-- 📥 [Download official ZIP](https://chatbotagent.biz/my-account/)
+- 📥 [Download official ZIP](https://chatbotagent.biz/)
