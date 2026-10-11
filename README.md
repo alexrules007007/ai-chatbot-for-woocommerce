@@ -2,7 +2,7 @@
 
 ### Download the plugin
 
-Download the latest `ai-chatbot-for-woocommerce.zip` from your account:
+Download the latest `ai-chatbot-for-woocommerce.zip` from:
 
 👉 **[chatbotagent.biz/](https://chatbotagent.biz/)**
 
