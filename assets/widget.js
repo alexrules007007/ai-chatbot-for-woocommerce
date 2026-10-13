@@ -14,10 +14,7 @@
     var SK      = 'wcai_v8_history';
     var FONT    = WCAI_CONFIG.font || 'system-ui, sans-serif';
 
-    window.wcai_license_key   = WCAI_CONFIG.licenseKey || '';
-    window.wcai_site_hash     = WCAI_CONFIG.siteHash || '';
-    window.wcai_domain        = WCAI_CONFIG.domain || '';
-    window.wcaiShowMoreOpenText  = WCAI_CONFIG.showMoreOpen || '📖 Show more...';
+        window.wcaiShowMoreOpenText  = WCAI_CONFIG.showMoreOpen || '📖 Show more...';
     window.wcaiShowMoreCloseText = WCAI_CONFIG.showMoreClose || '📖 Hide details';
 
     function getCookie(name) {
@@ -162,6 +159,38 @@
         xhr.onerror = function () { hideTyping(); busy = false; addMsg('Network error', true, false); };
         xhr.ontimeout = function () { hideTyping(); busy = false; addMsg('Timeout', true, false); };
 
+                var pageContext = {
+            url: window.location.href,
+            title: document.title,
+            page_type: 'other',
+            product_id: null,
+            product_name: null,
+            product_price: null,
+            category: null
+        };
+
+        if (document.body.classList.contains('single-product')) {
+            pageContext.page_type = 'product';
+            var t = document.querySelector('h1.product_title, h1.entry-title');
+            if (t) pageContext.product_name = t.textContent.trim();
+            var pidInput = document.querySelector('input[name="product_id"], input[name="add-to-cart"]');
+            if (pidInput) pageContext.product_id = parseInt(pidInput.value) || null;
+            var priceEl = document.querySelector('.summary .price');
+            if (priceEl) pageContext.product_price = priceEl.textContent.trim();
+            var catEl = document.querySelector('.posted_in a, .product_meta a[rel="tag"]');
+            if (catEl) pageContext.category = catEl.textContent.trim();
+        } else if (document.body.classList.contains('archive') || document.body.classList.contains('tax-product_cat')) {
+            pageContext.page_type = 'category';
+            var ct = document.querySelector('h1.page-title, h1.entry-title');
+            if (ct) pageContext.category = ct.textContent.trim();
+        } else if (document.body.classList.contains('woocommerce-cart')) {
+            pageContext.page_type = 'cart';
+        } else if (document.body.classList.contains('woocommerce-checkout')) {
+            pageContext.page_type = 'checkout';
+        } else if (document.body.classList.contains('home') || document.body.classList.contains('front-page')) {
+            pageContext.page_type = 'home';
+        }
+
         xhr.send([
             'action=wcai_send',
             'nonce=' + encodeURIComponent(NONCE),
@@ -169,6 +198,7 @@
             'history=' + encodeURIComponent(JSON.stringify(load())),
             'currency=' + encodeURIComponent(getActiveCurrency()),
             'session_id=' + encodeURIComponent(SESSION_ID),
+            'page_context=' + encodeURIComponent(JSON.stringify(pageContext)),
         ].join('&'));
     }
 
@@ -288,88 +318,90 @@
             b.textContent = showMoreCloseText;
         });
 
-        removeVideo();
+                removeVideo();
 
+        var restUrl = window.location.origin + '/wp-json/wc-ai/v1/product-details-public';
         var xhr = new XMLHttpRequest();
-        xhr.open('POST', window.location.origin + '/wp-json/wc-ai/v1/product-details');
+        xhr.open('POST', restUrl);
         xhr.setRequestHeader('Content-Type', 'application/json');
-        xhr.setRequestHeader('X-License-Key', window.wcai_license_key || '');
-        xhr.setRequestHeader('X-Site-Hash', window.wcai_site_hash || '');
 
         xhr.onload = function() {
-            if (xhr.status === 200) {
-                try {
-                    var p = JSON.parse(xhr.responseText);
-                    if (p.error) { container.innerHTML = '⚠️ ' + esc(p.error); return; }
-
-                    var videoId = extractVideoId(p.description || '');
-                    if (videoId) createVideo(videoId);
-
-                    var s = {
-                        name: esc(p.name || 'Product'),
-                        price: esc(p.price || ''),
-                        regular_price: esc(p.regular_price || ''),
-                        sale_price: esc(p.sale_price || ''),
-                        image: esc(p.image || ''),
-                        url: esc(p.url || '#'),
-                        brand: esc(p.brand || ''),
-                        category: esc(p.category || ''),
-                        sku: esc(p.sku || ''),
-                        description: esc(p.description || ''),
-                        material: esc(p.material || ''),
-                        difficulty: esc(p.difficulty || ''),
-                        in_stock: !!p.in_stock,
-                        rating: parseFloat(p.rating) || 0,
-                        rating_count: parseInt(p.rating_count) || 0,
-                        colors: parseInt(p.colors) || 0,
-                        stitches: parseInt(p.stitches) || 0,
-                        available_sizes: Array.isArray(p.available_sizes) ? p.available_sizes.map(esc) : []
-                    };
-
-                    var html = '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;padding:6px 0;">';
-                    if (s.image) html += '<div style="flex:0 0 130px;"><img src="' + s.image + '" style="width:100%;border-radius:8px;border:1px solid #e5e7eb;" alt="' + s.name + '"></div>';
-                    html += '<div style="flex:1;min-width:180px;">';
-                    html += '<div style="font-weight:700;font-size:15px;">' + s.name + '</div>';
-                    if (p.is_on_sale && p.sale_price) {
-                        html += '<div style="font-weight:700;color:#dc2626;font-size:20px;margin:4px 0;"><span style="text-decoration:line-through;color:#9ca3af;font-size:13px;">' + s.regular_price + '</span> ' + s.price + '</div>';
-                    } else if (s.price) {
-                        html += '<div style="font-weight:700;color:#22c55e;font-size:20px;margin:4px 0;">' + s.price + '</div>';
-                    }
-                    if (s.rating > 0) html += '<div style="font-size:13px;color:#6b7280;">⭐ ' + s.rating.toFixed(1) + ' (' + s.rating_count + ' reviews)</div>';
-
-                    var info = [];
-                    if (s.brand) info.push('🏷️ Brand: ' + s.brand);
-                    if (s.category) info.push('📂 Category: ' + s.category);
-                    if (s.sku) info.push('🔢 SKU: ' + s.sku);
-                    var d = s.description.replace(/\[embed\][^\]]*\[\/embed\]/g, '').replace(/<iframe[^>]*>.*?<\/iframe>/gi, '').trim();
-                    if (d) info.push(d);
-                    if (info.length) html += '<div style="margin-top:6px;font-size:13px;color:#4b5563;line-height:1.6;">' + info.join('<br>') + '</div>';
-                    if (s.available_sizes && s.available_sizes.length) {
-                        html += '<div style="margin-top:8px;font-size:12px;color:#6b7280;background:#f9fafb;padding:6px 10px;border-radius:6px;border:1px solid #e5e7eb;">📏 Sizes: ' + s.available_sizes.join(' · ') + '</div>';
-                    }
-                    if (s.material) html += '<div style="margin-top:4px;font-size:12px;color:#6b7280;">🧵 Material: ' + s.material + '</div>';
-                    if (s.colors) html += '<div style="margin-top:4px;font-size:12px;color:#6b7280;">🎨 Colors: ' + s.colors + '</div>';
-                    if (s.stitches) html += '<div style="margin-top:4px;font-size:12px;color:#6b7280;">🪡 Stitches: ' + s.stitches + '</div>';
-                    if (s.difficulty) html += '<div style="margin-top:4px;font-size:12px;color:#6b7280;">📊 Difficulty: ' + s.difficulty + '</div>';
-                    html += '<div style="margin-top:4px;font-size:12px;color:' + (s.in_stock ? '#22c55e' : '#dc2626') + ';">' + (s.in_stock ? '✅ In stock' : '❌ Out of stock') + '</div>';
-                    html += '<div style="margin-top:8px;"><a href="' + s.url + '" target="_blank" rel="noopener" style="background:#4F46E5;color:#fff;padding:6px 16px;border-radius:20px;text-decoration:none;font-size:12px;font-weight:600;">🔗 View Product</a></div>';
-                    html += '</div></div>';
-
-                    container.innerHTML = html;
-                    setTimeout(function() {
-                        container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }, 200);
-                } catch(e) {
-                    container.innerHTML = '⚠️ Error loading details';
-                }
-            } else {
+            if (xhr.status !== 200) {
                 container.innerHTML = '⚠️ Error (HTTP ' + xhr.status + ')';
+                return;
+            }
+            try {
+                var p = JSON.parse(xhr.responseText);
+                if (p.error) {
+                    container.innerHTML = '⚠️ ' + esc(p.error);
+                    return;
+                }
+
+                var videoId = extractVideoId(p.description || '');
+                if (videoId) createVideo(videoId);
+
+                var s = {
+                    name: esc(p.name || 'Product'),
+                    price: esc(p.price || ''),
+                    regular_price: esc(p.regular_price || ''),
+                    sale_price: esc(p.sale_price || ''),
+                    image: esc(p.image || ''),
+                    url: esc(p.url || '#'),
+                    brand: esc(p.brand || ''),
+                    category: esc(p.category || ''),
+                    sku: esc(p.sku || ''),
+                    description: esc(p.description || ''),
+                    material: esc(p.material || ''),
+                    difficulty: esc(p.difficulty || ''),
+                    in_stock: !!p.in_stock,
+                    rating: parseFloat(p.rating) || 0,
+                    rating_count: parseInt(p.rating_count) || 0,
+                    colors: parseInt(p.colors) || 0,
+                    stitches: parseInt(p.stitches) || 0,
+                    available_sizes: Array.isArray(p.available_sizes) ? p.available_sizes.map(esc) : []
+                };
+
+                var html = '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;padding:6px 0;">';
+                if (s.image) html += '<div style="flex:0 0 130px;"><img src="' + s.image + '" style="width:100%;border-radius:8px;border:1px solid #e5e7eb;" alt="' + s.name + '"></div>';
+                html += '<div style="flex:1;min-width:180px;">';
+                html += '<div style="font-weight:700;font-size:15px;">' + s.name + '</div>';
+                if (p.is_on_sale && p.sale_price) {
+                    html += '<div style="font-weight:700;color:#dc2626;font-size:20px;margin:4px 0;"><span style="text-decoration:line-through;color:#9ca3af;font-size:13px;">' + s.regular_price + '</span> ' + s.price + '</div>';
+                } else if (s.price) {
+                    html += '<div style="font-weight:700;color:#22c55e;font-size:20px;margin:4px 0;">' + s.price + '</div>';
+                }
+                if (s.rating > 0) html += '<div style="font-size:13px;color:#6b7280;">⭐ ' + s.rating.toFixed(1) + ' (' + s.rating_count + ' reviews)</div>';
+
+                var info = [];
+                if (s.brand) info.push('🏷️ Brand: ' + s.brand);
+                if (s.category) info.push('📂 Category: ' + s.category);
+                if (s.sku) info.push('🔢 SKU: ' + s.sku);
+                var d = s.description.replace(/\[embed\][^\]]*\[\/embed\]/g, '').replace(/<iframe[^>]*>.*?<\/iframe>/gi, '').trim();
+                if (d) info.push(d);
+                if (info.length) html += '<div style="margin-top:6px;font-size:13px;color:#4b5563;line-height:1.6;">' + info.join('<br>') + '</div>';
+                if (s.available_sizes && s.available_sizes.length) {
+                    html += '<div style="margin-top:8px;font-size:12px;color:#6b7280;background:#f9fafb;padding:6px 10px;border-radius:6px;border:1px solid #e5e7eb;">📏 Sizes: ' + s.available_sizes.join(' · ') + '</div>';
+                }
+                if (s.material) html += '<div style="margin-top:4px;font-size:12px;color:#6b7280;">🧵 Material: ' + s.material + '</div>';
+                if (s.colors) html += '<div style="margin-top:4px;font-size:12px;color:#6b7280;">🎨 Colors: ' + s.colors + '</div>';
+                if (s.stitches) html += '<div style="margin-top:4px;font-size:12px;color:#6b7280;">🪡 Stitches: ' + s.stitches + '</div>';
+                if (s.difficulty) html += '<div style="margin-top:4px;font-size:12px;color:#6b7280;">📊 Difficulty: ' + s.difficulty + '</div>';
+                html += '<div style="margin-top:4px;font-size:12px;color:' + (s.in_stock ? '#22c55e' : '#dc2626') + ';">' + (s.in_stock ? '✅ In stock' : '❌ Out of stock') + '</div>';
+                html += '<div style="margin-top:8px;"><a href="' + s.url + '" target="_blank" rel="noopener" style="background:#4F46E5;color:#fff;padding:6px 16px;border-radius:20px;text-decoration:none;font-size:12px;font-weight:600;">🔗 View Product</a></div>';
+                html += '</div></div>';
+
+                container.innerHTML = html;
+                setTimeout(function() {
+                    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 200);
+            } catch(e) {
+                container.innerHTML = '⚠️ Error loading details';
             }
         };
         xhr.onerror = function() {
             container.innerHTML = '⚠️ Network error';
         };
-        xhr.send(JSON.stringify({ product_id: productId, product_name: productName }));
+        xhr.send(JSON.stringify({ product_id: productId }));
     };
 })();
 
