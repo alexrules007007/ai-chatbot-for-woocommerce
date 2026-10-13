@@ -254,7 +254,7 @@ function wcai_install() {
         INDEX idx_weight  (weight)
     ) $charset", $tt));
 
-    $wpdb->query($wpdb->prepare("CREATE TABLE IF NOT EXISTS %i (
+        $wpdb->query($wpdb->prepare("CREATE TABLE IF NOT EXISTS %i (
         id               BIGINT AUTO_INCREMENT PRIMARY KEY,
         user_query       TEXT,
         bot_reply        TEXT,
@@ -264,17 +264,31 @@ function wcai_install() {
         products_count   INT DEFAULT 0,
         search_time      DECIMAL(5,3),
         session_id       VARCHAR(64) DEFAULT '',
-        user_email_hash  VARCHAR(64) DEFAULT '',
-        user_ip_hash     VARCHAR(64) DEFAULT '',
+        user_email_hash  VARCHAR(255) DEFAULT '',
+        user_ip_hash     VARCHAR(255) DEFAULT '',
         lead_converted   TINYINT(1) DEFAULT 0,
         created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_created (created_at),
         INDEX idx_session (session_id),
-        INDEX idx_email_hash (user_email_hash),
-        INDEX idx_ip_hash (user_ip_hash),
+        INDEX idx_email_hash (user_email_hash(191)),
+        INDEX idx_ip_hash (user_ip_hash(191)),
         INDEX idx_lead (lead_converted)
     ) $charset", $p . 'wcai_logs'));
-
+    // Миграция: расширяем user_email_hash / user_ip_hash если узкие
+    $cols_info = $wpdb->get_results($wpdb->prepare("SHOW COLUMNS FROM %i", $p . 'wcai_logs'));
+    foreach ($cols_info as $col) {
+        if (in_array($col->Field, ['user_email_hash', 'user_ip_hash', 'user_email', 'user_ip'], true)) {
+            $type = strtolower($col->Type);
+            if (strpos($type, 'varchar') === 0 && preg_match('/varchar\((\d+)\)/', $type, $m)) {
+                if ((int)$m[1] < 255) {
+                    $wpdb->query($wpdb->prepare(
+                        "ALTER TABLE %i MODIFY COLUMN `{$col->Field}` VARCHAR(255) DEFAULT ''",
+                        $p . 'wcai_logs'
+                    ));
+                }
+            }
+        }
+    }
     delete_option('wcai_index_offset');
     delete_option('wcai_index_total');
     delete_option('wcai_index_status');
@@ -2493,6 +2507,39 @@ add_action('rest_api_init', function () {
                 && hash_equals((string) get_option('wcai_site_hash'), (string) $hash);
         }
     ]);
+        register_rest_route('wc-ai/v1', '/product-details-public', [
+        'methods' => 'POST',
+        'callback' => function ($req) {
+            if (!wcai_is_license_active()) {
+                return new WP_REST_Response(['error' => 'License inactive'], 403);
+            }
+
+            $ip = wcai_get_real_ip();
+            $rate_key = 'wcai_pd_rate_' . md5($ip);
+            $attempts = (int) get_transient($rate_key);
+            if ($attempts >= 30) {
+                return new WP_REST_Response(['error' => 'Too many requests'], 429);
+            }
+            set_transient($rate_key, $attempts + 1, 60);
+
+            $params = $req->get_json_params();
+            $product_id = (int)($params['product_id'] ?? 0);
+            if (!$product_id) {
+                return new WP_REST_Response(['error' => 'No product_id'], 400);
+            }
+
+            global $wpdb;
+            $pt = $wpdb->prefix . 'wcai_products';
+            $product = $wpdb->get_row($wpdb->prepare("SELECT * FROM $pt WHERE product_id = %d", $product_id));
+            if (!$product) {
+                return new WP_REST_Response(['error' => 'Product not found'], 404);
+            }
+
+            $formatted = wcai_format_products([$product]);
+            return new WP_REST_Response($formatted[0] ?? [], 200);
+        },
+        'permission_callback' => '__return_true',
+    ]);
 
     register_rest_route('wc-ai/v1', '/product-details', [
         'methods' => 'POST',
@@ -2980,9 +3027,23 @@ function wcai_ajax_send_with_tracking() {
     }
     set_transient($rate_key, ((int)$attempts + 1), 60);
 
-    $history_raw = wp_unslash($_POST['history'] ?? '[]');
+        $history_raw = wp_unslash($_POST['history'] ?? '[]');
     $history = json_decode($history_raw, true);
     if (!is_array($history)) $history = [];
+
+    $page_context_raw = wp_unslash($_POST['page_context'] ?? '{}');
+    $page_context = json_decode($page_context_raw, true);
+    if (!is_array($page_context)) $page_context = [];
+
+    $page_context = [
+        'url'           => isset($page_context['url']) ? esc_url_raw(substr($page_context['url'], 0, 500)) : '',
+        'title'         => isset($page_context['title']) ? sanitize_text_field(substr($page_context['title'], 0, 200)) : '',
+        'page_type'     => isset($page_context['page_type']) ? sanitize_text_field($page_context['page_type']) : 'other',
+        'product_id'    => isset($page_context['product_id']) ? (int)$page_context['product_id'] : null,
+        'product_name'  => isset($page_context['product_name']) ? sanitize_text_field(substr($page_context['product_name'], 0, 200)) : null,
+        'product_price' => isset($page_context['product_price']) ? sanitize_text_field(substr($page_context['product_price'], 0, 50)) : null,
+        'category'      => isset($page_context['category']) ? sanitize_text_field(substr($page_context['category'], 0, 200)) : null,
+    ];
 
     $license_key = get_option('wcai_license_key', '');
     if (empty($license_key)) {
@@ -3024,11 +3085,12 @@ function wcai_ajax_send_with_tracking() {
             'domain' => get_option('wcai_domain', ''),
             'merchant_prompt' => get_option('wcai_merchant_prompt', ''),
             'catalog_info' => $catalog_info,
-            'context' => [
+                        'context' => [
                 'store_name' => get_option('wcai_store_name', get_bloginfo('name')),
                 'currency' => $currency,
                 'exchange_rate' => $rate,
                 'symbol' => $symbol,
+                'page_context' => $page_context,
             ],
         ]),
         'timeout' => 120,
@@ -5034,16 +5096,13 @@ function wcai_widget() {
     ));
 
     wp_enqueue_script('wcai-widget', WCAI_URL . 'assets/widget.js', [], WCAI_VERSION, true);
-    wp_localize_script('wcai-widget', 'WCAI_CONFIG', [
+        wp_localize_script('wcai-widget', 'WCAI_CONFIG', [
         'ajaxUrl'      => admin_url('admin-ajax.php'),
         'nonce'        => wp_create_nonce('wcai_nonce'),
         'welcome'      => get_option('wcai_welcome_message', 'Hi! How can I help you find products today?'),
         'currency'     => wcai_get_active_currency(),
         'defaultCurrency' => get_woocommerce_currency(),
         'font'         => $font_stack,
-        'licenseKey'   => get_option('wcai_license_key', ''),
-        'siteHash'     => wcai_get_site_hash(),
-        'domain'       => wcai_normalize_domain(home_url()),
         'showMoreOpen' => get_option('wcai_show_more_open_text', '📖 Show more...'),
         'showMoreClose'=> get_option('wcai_show_more_close_text', '📖 Hide details'),
     ]);
@@ -5465,3 +5524,211 @@ add_action('wp_footer', function() {
     </style>
     <?php
 }, 999999);
+/* ============================================================
+   WCAI PAGE CONTEXT DEBUG — полная диагностика
+   ============================================================ */
+add_action('admin_menu', function() {
+    add_submenu_page(
+        'wcai', '🧪 Page Context Test', '🧪 Page Context Test',
+        'manage_options', 'wcai-page-context-test', 'wcai_page_context_test_page'
+    );
+}, 999);
+
+function wcai_page_context_test_page() {
+    if (!current_user_can('manage_options')) return;
+
+    $result = null;
+
+    if (isset($_POST['wcai_pc_test']) && check_admin_referer('wcai_pc_test')) {
+        $result = wcai_page_context_full_test();
+    }
+
+    ?>
+    <div class="wrap">
+        <h1>🧪 Page Context Test</h1>
+        <p style="color:#6b7280;">Проверяет, доходит ли <code>page_context</code> от фронта до SaaS и используется ли он.</p>
+
+        <form method="post" style="margin:16px 0;">
+            <?php wp_nonce_field('wcai_pc_test'); ?>
+            <button name="wcai_pc_test" class="button button-primary">▶ Запустить полный тест</button>
+        </form>
+
+        <div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:14px 18px;border-radius:10px;margin:16px 0;font-size:13px;">
+            <strong>Что проверяет:</strong>
+            <ol style="margin:8px 0 0 20px;">
+                <li>Есть ли <code>page_context</code> в JS-коде <code>widget.js</code> (на диске).</li>
+                <li>Передаёт ли JS его в AJAX-запрос (проверка исходника файла).</li>
+                <li>Принимает ли PHP его из <code>$_POST</code>.</li>
+                <li>Передаёт ли клиентский PHP его в SaaS.</li>
+                <li>Использует ли SaaS его в промпте.</li>
+                <li>Реальный E2E-тест: симулирует запрос с <code>page_context</code> и смотрит ответ LLM.</li>
+            </ol>
+        </div>
+
+        <?php if ($result): ?>
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin:16px 0;">
+                <h2 style="margin-top:0;font-size:15px;">Результаты</h2>
+                <table class="wp-list-table widefat fixed striped">
+                    <thead><tr><th width="60">OK</th><th width="300">Проверка</th><th>Детали</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($result as $r): ?>
+                        <tr>
+                            <td><?php echo $r['ok'] ? '✅' : '❌'; ?></td>
+                            <td><strong><?php echo esc_html($r['label']); ?></strong></td>
+                            <td style="font-family:monospace;font-size:12px;word-break:break-all;"><?php echo wp_kses_post($r['value']); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
+function wcai_page_context_full_test() {
+    global $wpdb;
+    $results = [];
+
+    // ─── 1. Есть ли page_context в widget.js на диске ───────────
+    $widget_js_path = WCAI_PATH . 'assets/widget.js';
+    $widget_js_content = file_exists($widget_js_path) ? file_get_contents($widget_js_path) : '';
+
+    $has_js_collect = (strpos($widget_js_content, 'pageContext') !== false);
+    $results[] = [
+        'label' => '1. widget.js содержит "pageContext"',
+        'ok'    => $has_js_collect,
+        'value' => $has_js_collect ? 'YES (размер файла ' . filesize($widget_js_path) . ')' : 'NO — файл не обновлён, загрузи новый widget.js',
+    ];
+
+    $has_js_send = (strpos($widget_js_content, 'page_context=') !== false);
+    $results[] = [
+        'label' => '2. widget.js отправляет page_context в AJAX',
+        'ok'    => $has_js_send,
+        'value' => $has_js_send ? 'YES' : 'NO — в xhr.send нет page_context',
+    ];
+
+    // Проверка bundle URL (версия)
+    $results[] = [
+        'label' => '3. WCAI_VERSION',
+        'ok'    => true,
+        'value' => WCAI_VERSION . ' (если менял widget.js — должно быть 8.1.2+)',
+    ];
+
+    // ─── 4. Принимает ли PHP из $_POST ──────────────────────────
+    $handler_php_path = __FILE__;
+    $handler_php_content = file_get_contents($handler_php_path);
+
+    $has_php_receive = (strpos($handler_php_content, "\$_POST['page_context']") !== false
+                     || strpos($handler_php_content, '$_POST["page_context"]') !== false);
+    $results[] = [
+        'label' => '4. PHP принимает $_POST[\'page_context\']',
+        'ok'    => $has_php_receive,
+        'value' => $has_php_receive ? 'YES' : 'NO — код PHP не обновлён',
+    ];
+
+    $has_php_pass = (strpos($handler_php_content, "'page_context' => \$page_context") !== false
+                  || strpos($handler_php_content, '"page_context" => $page_context') !== false);
+    $results[] = [
+        'label' => '5. PHP передаёт page_context в SaaS',
+        'ok'    => $has_php_pass,
+        'value' => $has_php_pass ? 'YES' : 'NO — в body запроса к SaaS нет page_context',
+    ];
+
+    // ─── 6. Симуляция запроса с page_context ────────────────────
+    $license_key = get_option('wcai_license_key', '');
+    if (empty($license_key)) {
+        $results[] = ['label' => '6. Симуляция E2E', 'ok' => false, 'value' => 'Нет license_key'];
+        return $results;
+    }
+
+    $site_hash = wcai_get_site_hash();
+    $currency = wcai_get_active_currency();
+
+    $test_page_context = [
+        'url'          => home_url('/product/test-product/'),
+        'title'        => 'Test Product',
+        'page_type'    => 'product',
+        'product_id'   => 99999,
+        'product_name' => 'Dorian East-West Clutch',
+        'product_price'=> '€450.00',
+        'category'     => 'Bags',
+    ];
+
+    // Catalog info (как в реальном запросе)
+    $pt = $wpdb->prefix . 'wcai_products';
+    $brands = $wpdb->get_col("SELECT DISTINCT brand FROM $pt WHERE brand != '' LIMIT 20");
+    $categories = $wpdb->get_col("SELECT DISTINCT category FROM $pt WHERE category != '' LIMIT 20");
+    $catalog_info = '';
+    if (!empty($brands)) $catalog_info .= "Brands: " . implode(', ', $brands) . "\n";
+    if (!empty($categories)) $catalog_info .= "Categories: " . implode(', ', $categories) . "\n";
+
+    $response = wp_remote_post(WCAI_SAAS_URL . '/chat', [
+        'headers' => [
+            'Authorization' => 'Bearer ' . $license_key,
+            'Content-Type'  => 'application/json',
+        ],
+        'body' => json_encode([
+            'message'         => 'Что посоветуешь?',
+            'history'         => [],
+            'site_hash'       => $site_hash,
+            'domain'          => get_option('wcai_domain', ''),
+            'merchant_prompt' => get_option('wcai_merchant_prompt', ''),
+            'catalog_info'    => $catalog_info,
+            'context' => [
+                'store_name' => get_option('wcai_store_name', get_bloginfo('name')),
+                'currency'   => $currency,
+                'exchange_rate' => wcai_get_currency_rate($currency),
+                'symbol'     => wcai_get_currency_symbol($currency),
+                'page_context' => $test_page_context,
+            ],
+        ]),
+        'timeout' => 60,
+    ]);
+
+    if (is_wp_error($response)) {
+        $results[] = ['label' => '6. Симуляция E2E — ответ SaaS', 'ok' => false, 'value' => 'WP_Error: ' . $response->get_error_message()];
+        return $results;
+    }
+
+    $code = wp_remote_retrieve_response_code($response);
+    $body = json_decode(wp_remote_retrieve_body($response), true);
+
+    if ($code !== 200 || !is_array($body)) {
+        $results[] = ['label' => '6. Симуляция E2E — HTTP', 'ok' => false, 'value' => "HTTP {$code}"];
+        return $results;
+    }
+
+    $reply = $body['plain_reply'] ?? ($body['reply'] ?? '');
+    $plain = trim(wp_strip_all_tags($reply));
+
+    // Проверяем, упомянул ли LLM товар
+    $mentions_product = (
+        stripos($plain, 'clutch') !== false ||
+        stripos($plain, 'Dorian') !== false ||
+        stripos($plain, 'кладч') !== false ||
+        stripos($plain, 'сумк') !== false
+    );
+
+    $results[] = [
+        'label' => '6. Симуляция E2E — ответ LLM',
+        'ok'    => $mentions_product,
+        'value' => $mentions_product
+            ? '✅ LLM упомянула товар со страницы'
+            : '❌ LLM НЕ упомянула товар. Ответ: ' . esc_html(mb_substr($plain, 0, 200)),
+    ];
+
+    $results[] = [
+        'label' => '7. Полный текст ответа',
+        'ok'    => true,
+        'value' => esc_html(mb_substr($plain, 0, 500)),
+    ];
+
+    $results[] = [
+        'label' => '8. Что отправили в SaaS',
+        'ok'    => true,
+        'value' => esc_html(wp_json_encode(['page_context' => $test_page_context], JSON_UNESCAPED_UNICODE)),
+    ];
+
+    return $results;
+}
