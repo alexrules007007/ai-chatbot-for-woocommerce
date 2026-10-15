@@ -58,26 +58,27 @@
     function uid() { return Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
 
     function addMsg(text, isBot, isHtml, id) {
-        id = id || uid();
-        if (seen.has(id)) return;
-        seen.add(id);
+    id = id || uid();
+    if (seen.has(id)) return;
+    seen.add(id);
 
-        var el = document.createElement('div');
-        el.className = 'wcai-msg ' + (isBot ? 'bot' : 'user');
-        el.dataset.id = id;
+    var el = document.createElement('div');
+    el.className = 'wcai-msg ' + (isBot ? 'bot' : 'user');
+    el.dataset.id = id;
 
-        if (isBot) {
-            if (!text || text.trim() === '') return;
-            el.innerHTML = text;
-            el.style.fontFamily = FONT;
-            el.querySelectorAll('*').forEach(function(child) { child.style.fontFamily = FONT; });
-        } else {
-            el.textContent = text;
-        }
-
-        msgs.appendChild(el);
-        msgs.scrollTop = msgs.scrollHeight;
+    if (isBot) {
+        if (!text || text.trim() === '') return;
+        text = text.replace(/\[SHOWED PRODUCTS:[\s\S]*?\]\s*/i, '');
+        el.innerHTML = text;
+        el.style.fontFamily = FONT;
+        el.querySelectorAll('*').forEach(function(child) { child.style.fontFamily = FONT; });
+    } else {
+        el.textContent = text;
     }
+
+    msgs.appendChild(el);
+    msgs.scrollTop = msgs.scrollHeight;
+}
 
     function render() {
         msgs.innerHTML = '';
