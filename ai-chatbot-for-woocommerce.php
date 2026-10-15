@@ -3204,7 +3204,20 @@ function wcai_ajax_send_with_tracking() {
     } catch (Exception $e) {
         error_log('Log error: ' . $e->getMessage());
     }
-
+if (!empty($products)) {
+    $product_summary = [];
+    foreach (array_slice($products, 0, 10) as $p) {
+        $product_summary[] = sprintf(
+            '%s (rating: %.1f, reviews: %d, sales: %d, price: %s)',
+            $p['name'] ?? 'Product',
+            (float)($p['rating'] ?? 0),
+            (int)($p['rating_count'] ?? 0),
+            (int)($p['sales_count'] ?? 0),
+            $p['price'] ?? ''
+        );
+    }
+    $reply = "[SHOWED PRODUCTS:\n- " . implode("\n- ", $product_summary) . "]\n\n" . $reply;
+}
     wp_send_json_success([
         'reply' => $reply,
         'plain_reply' => $plain_reply,
